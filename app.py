@@ -141,31 +141,32 @@ def graphs(graph):
 
 if __name__ == "__main__":
 
-    st.set_page_config(layout = 'wide')
-
-    #EXTRACT
-    df1_orig = import_data()
-
-    #TRANSFORM
-
-    df = add_wallet_loop(df1_orig)
-    df1 = df1_orig.copy()
-
-    #LOAD
-    st.title('Summary')
-    st.write(df1)
-
-    filter_stocks = st.multiselect('Which trades are going to be analysed?', df['id'].astype('str').unique())
-    filter_label = st.multiselect('Which wallet is going to be analysed?', df['label'].unique())
-
-    c3, c4 = st.beta_columns(2)
-
-    with c3:
-        filter_date_start = st.date_input('Select start of series')
-
-    with c4:
-        filter_date_end = st.date_input('Select end of series')
-
-    graph = filter(filter_stocks, filter_date_start, filter_date_end)
-    graphs(graph)
+    st.write('test')
+    # st.set_page_config(layout = 'wide')
+    #
+    # #EXTRACT
+    # df1_orig = import_data()
+    #
+    # #TRANSFORM
+    #
+    # df = add_wallet_loop(df1_orig)
+    # df1 = df1_orig.copy()
+    #
+    # #LOAD
+    # st.title('Summary')
+    # st.write(df1)
+    #
+    # filter_stocks = st.multiselect('Which trades are going to be analysed?', df['id'].astype('str').unique())
+    # filter_label = st.multiselect('Which wallet is going to be analysed?', df['label'].unique())
+    #
+    # c3, c4 = st.beta_columns(2)
+    #
+    # with c3:
+    #     filter_date_start = st.date_input('Select start of series')
+    #
+    # with c4:
+    #     filter_date_end = st.date_input('Select end of series')
+    #
+    # graph = filter(filter_stocks, filter_date_start, filter_date_end)
+    # graphs(graph)
 
