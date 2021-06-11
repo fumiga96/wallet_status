@@ -141,7 +141,6 @@ def graphs(graph):
 
 if __name__ == "__main__":
 
-    st.write('test')
     st.set_page_config(layout = 'wide')
 
     #EXTRACT
