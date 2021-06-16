@@ -2,170 +2,202 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 import streamlit as st
+import plotly.graph_objects as pg_o
+import base64
 
-# functions
-def get_data( path ,engine):
-    df = pd.read_csv( path, engine = engine)
+def get_table_download_link(df):
+    """Generates a link allowing the data in a given panda dataframe to be downloaded
+    in:  dataframe
+    out: href string
+    """
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()  # some strings <-> bytes conversions necessary here
+    href = f'<a href="data:file/csv;base64,{b64}">Download csv file</a>'
+    st.markdown(href, unsafe_allow_html=True)
 
-    return df
-# resgata o historico de preco de uma companhia
-def price_history(company_ticker):
-    df1 = yf.Ticker(company_ticker)
-    df1 = df1.history(period="max")
-    return df1
-
-
-# ajusta a acao de acordo com o que foi negociado na carteira
-def my_wallet(company_ticker, df1, qty, date_start, date_finish, sell, buy):
-    # quantidade de acoes
-    df1 = df1[['Open', 'Close']].multiply(qty, axis="index").reset_index()
-    # tagear as linhas relacionadas a essa acao
-    df1[['Code']] = company_ticker
-    # periodo de posse
-
-    if pd.isnull(date_finish) == True:
-        date_finish = pd.Timestamp("today").strftime("%m/%d/%Y")
-
-    df1 = df1.reset_index()
-    df1.loc[df1['index'] != 0, 'compare'] = df1['Close'].shift(1)
-    df1.loc[df1['Date'] == date_start, 'compare'] = buy * qty
-    df1.loc[df1['Date'] == date_finish, 'Close'] = sell * qty
-    df1 = df1.loc[(df1['Date'] >= date_start) & (df1['Date'] <= date_finish), ['Date', 'Close', 'compare', 'Code']]
-
-    return df1
-
-
-
-def add_stock(df, company_ticker, date_start, date_finish, qty, sell, buy, label):
-    # adquirir dados
-    df1 = price_history(company_ticker)
-
-    # ajustar as acoes de acordo com sua carteira
-    df1 = my_wallet(company_ticker, df1, qty, date_start, date_finish, sell, buy)
-
-    # concatenar dados e agrupalos pela data
-    if len(df) == 0:
-        df1['id'] = 1
+def import_data():
+    uploaded_file = st.file_uploader('Upload here your trade history')
+    if uploaded_file is not None:
+        transactions = pd.read_csv(uploaded_file)
+        transactions = format_date(transactions)
     else:
-        df1['id'] = df['id'].max() + 1
+        st.title('Hello!')
+        st.subheader('If you are new here, a quick guide below can help you use this tool')
+        st.write('This tool is capable of display you the performance of your investment portfolio.')
+        st.write('All you need to do is upload a .csv file at the top of this page. An example can be downloaded [here](https://drive.google.com/file/d/1GNjWrr8G3h6ubYk6OT1S4RTLCyf1uzSm/view?usp=sharing)')
+        st.subheader('Guidelines')
+        st.write('''Your file must constain the following columns, with their respective information:
+                    \n - id = identification for your transaction. It can be set as a sequence
+                    \n - purchase_date = day that you bought the stock (format "dd/mm/yyyy")
+                    \n - sell_date = day that you sold the stock. If you still have it, leave it blank (format "dd/mm/yyyy")
+                    \n - ticker = your stock ticker, as it in [https://finance.yahoo.com/](https://share.streamlit.io/mesmith027/streamlit_webapps/main/MC_pi/streamlit_app.py)
+                    \n - purchase_price = for how much you paid each share (use "." as decimal)
+                    \n - selling_price = for how much you sold each share (if you haven't sold, leave blanked. use "." as decimal)
+                    \n - quantity = how many shares you bought
+                    \n - lavel = if this trade is part of a cluster within your portfolio''')
+        st.write('If these requeriments are fullfilled properly, you should receive a dashboard like this...')
+        transactions = pd.DataFrame([[1,'12/4/2021','31/05/2021','COCA34.SA',50.3,48.2,5,'Solo']],columns = ['id','purchase_date','sell_date','ticker','purchase_price','selling_price','quantity','label'])
+        transactions = format_date(transactions)
 
-    df1['label'] = label
-    df = pd.concat([df, df1])
+    return transactions
 
-    return df
+
+def format_date(transactions):
+    transactions['purchase_date'] = pd.to_datetime(transactions['purchase_date'], format='%d/%m/%Y')
+    transactions['sell_date'] = pd.to_datetime(transactions['sell_date'], format='%d/%m/%Y')
+
+    return transactions
 
 
 @st.cache
-def add_wallet_loop(df1):
-    df = pd.DataFrame()
-    for row in df1.itertuples():
-        df = add_stock(df, row.ticker, row.purchase_date, row.sell_date, row.quantity, row.selling_price,
-                       row.purchase_price, row.label)
-    df['Date'] = pd.to_datetime(df['Date']).dt.date
-    return df
+def build_portfolio_history(transactions):
+    portfolio_history = pd.DataFrame()
+    for trade in transactions.itertuples():
+        stock_history = get_price_history(trade.ticker)
+        sell_date = complete_unsold_stocks(trade.sell_date)
+        trade_history = create_price_parameter(stock_history, trade.quantity, trade.purchase_price, trade.selling_price,
+                                               trade.purchase_date, sell_date)
+        trade_history = trade_history.loc[
+            (trade_history['Date'] >= trade.purchase_date) & (trade_history['Date'] <= trade.sell_date), ['Date',
+                                                                                                          'Close',
+                                                                                                          'compare']]
+        trade_history[['Code']] = trade.ticker
+        trade_history['label'] = trade.label
+        trade_history = create_trade_id(trade_history, portfolio_history)
+        portfolio_history = pd.concat([portfolio_history, trade_history])
 
-def import_data():
-    upload_file = st.file_uploader('Would you like to upload a set history')
-
-    if upload_file is not None:
-        df1_orig = get_data(upload_file, 'python')
-        df1_orig['purchase_date'] = pd.to_datetime(df1_orig['purchase_date'], format='%d/%m/%Y')
-        df1_orig['sell_date'] = pd.to_datetime(df1_orig['sell_date'], format='%d/%m/%Y')
+    return portfolio_history
 
 
+def get_price_history(trade_ticker):
+    stock_history = yf.Ticker(trade_ticker).history(period="max")
+    return stock_history
+
+
+def complete_unsold_stocks(sold_date):
+    if pd.isnull(sold_date) == True:
+        sell_date = pd.to_datetime('today')
     else:
-        df1_orig = pd.DataFrame([[1, '2021-04-12', '2021-05-31', 'COCA34.SA', 50.30, 48.20, 5, 'SOLO']],columns= ['id','purchase_date', 'sell_date', 'ticker', 'purchase_price', 'selling_price', 'quantity', 'label'])
+        sell_date = sold_date
+    return sell_date
 
-    return df1_orig
+
+def create_price_parameter(stock_history, trade_quantity, trade_purchase_price, trade_selling_price,
+                           trade_purchase_date, sell_date):
+    trade_history = stock_history[['Open', 'Close']].multiply(trade_quantity, axis="index").reset_index()
+    trade_history = trade_history.reset_index()
+    trade_history.loc[trade_history['index'] != 0, 'compare'] = trade_history['Close'].shift(1)
+    trade_history.loc[trade_history['Date'] == trade_purchase_date, 'compare'] = trade_purchase_price * trade_quantity
+    trade_history.loc[trade_history['Date'] == sell_date, 'Close'] = trade_selling_price * trade_quantity
+
+    return trade_history
 
 
-def filter(filter_stocks, filter_date_start, filter_date_end):
-    filter_stocks = list(map(int, filter_stocks))
-
-    if len(filter_stocks) == 0:
-        graph = df.loc[(df['Date'] >= filter_date_start) & (df['Date'] <= filter_date_end)]
+def create_trade_id(trade_history, portfolio_history):
+    if not 'id' in portfolio_history.columns:
+        trade_history['id'] = 1
     else:
-        graph = df.loc[
-            (df['Date'] >= filter_date_start) & (df['Date'] <= filter_date_end) & (df['id'].isin(filter_stocks))]
+        trade_history['id'] = portfolio_history['id'].max() + 1
+
+    return trade_history
+
+
+def filter_plot_data(portfolio_history, stocks_to_plot, plot_from_date, plot_to_date):
+    stocks_to_plot = list(map(int, stocks_to_plot))
+
+    if len(stocks_to_plot) == 0:
+        plot_data = portfolio_history.loc[
+            (portfolio_history['Date'] >= plot_from_date) & (portfolio_history['Date'] <= plot_to_date)]
+    else:
+        plot_data = portfolio_history.loc[
+            (portfolio_history['Date'] >= plot_from_date) & (portfolio_history['Date'] <= plot_to_date) & (
+                portfolio_history['id'].isin(stocks_to_plot))]
 
     if len(filter_label) != 0:
-        graph = graph.loc[graph['label'].isin(filter_label)]
+        plot_data = plot_data.loc[plot_data['label'].isin(filter_label)]
 
-    return graph
+    return plot_data
 
 
-def graphs(graph):
-    st.title('Growth (%)')
+def compute_y_values(plot_data):
+    plot_data = plot_data[['Date', 'Close', 'compare']].groupby('Date').sum().reset_index()
+    plot_data['Revenue ($)'] = (plot_data['Close'] - plot_data['compare'])
+    plot_data['Cumulative Revenue ($)'] = plot_data['Revenue ($)'].cumsum()
+    plot_data['Revenue (%)'] = plot_data['Revenue ($)'] / plot_data['compare']
+    plot_data['Cumulative Revenue (%)'] = plot_data['Revenue (%)'].cumsum()
 
+    return plot_data
+
+
+def plot_on_dashboard(plot_data):
+    build_plot_framework(plot_data, 'Cumulative Revenue (%)', 'Revenue (%)')
+    build_plot_framework(plot_data, 'Cumulative Revenue ($)', 'Revenue ($)')
+
+
+def build_plot_framework(plot_data, plot_title_1, plot_title_2):
     c1, c2 = st.beta_columns(2)
 
     with c1:
-        st.header('Cumulative wallet variation')
-        graph1 = graph[['Date', 'Close', 'compare']].groupby('Date').sum().reset_index()
-        graph1['Gains'] = graph1['Close'] - graph1['compare']
-        graph1['Gains'] = graph1['Gains'] / graph1['compare']
-        graph1['Gains'] = graph1['Gains'].cumsum()
-        fig = px.line(graph1, x="Date", y="Gains")
+        build_line_plot(plot_data, plot_title_1)
+
+    with c2:
+        build_financial_plot(plot_data, plot_title_2)
+
+
+def build_line_plot(plot_data, title):
+    st.subheader(title)
+    fig = px.line(plot_data, x="Date", y=title)
+    if '%' in title:
         fig.update_layout(yaxis_tickformat='%')
-        st.write(fig)
+    st.write(fig)
 
-    with c2:
-        st.header('Daily wallet variation')
-        graph2 = graph[['Date', 'Close', 'compare']].groupby('Date').sum().reset_index()
-        graph2['Gains'] = graph2['Close'] - graph2['compare']
-        graph2['Gains'] = graph2['Gains'] / graph2['compare']
-        fig2 = px.line(graph2, x="Date", y="Gains")
-        fig2.update_layout(yaxis_tickformat='%')
 
-        st.write(fig2)
+def build_financial_plot(plot_data, title):
+    st.subheader(title)
 
-    st.title('Growth ($)')
+    fig = pg_o.Figure(pg_o.Waterfall(
+        orientation="v",
+        x=plot_data["Date"],
+        textposition="outside",
+        y=plot_data[title],
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    if '%' in title:
+        fig.update_layout(yaxis_tickformat='%')
+    st.write(fig)
 
-    c1, c2 = st.beta_columns(2)
-
-    with c1:
-        st.header('Cumulative wallet variation')
-        graph1 = graph[['Date', 'Close', 'compare']].groupby('Date').sum().reset_index()
-        graph1['Gains ($)'] = graph1['Close'] - graph1['compare']
-        graph1['Gains ($)'] = graph1['Gains ($)'].cumsum()
-        fig = px.line(graph1, x="Date", y="Gains ($)")
-        st.write(fig)
-
-    with c2:
-        st.header('Daily wallet variation')
-        graph2 = graph[['Date', 'Close', 'compare']].groupby('Date').sum().reset_index()
-        graph2['Gains ($)'] = graph2['Close'] - graph2['compare']
-        fig2 = px.line(graph2, x="Date", y="Gains ($)")
-
-        st.write(fig2)
 
 if __name__ == "__main__":
+    st.set_page_config(layout='wide')
 
-    st.set_page_config(layout = 'wide')
 
-    #EXTRACT
-    df1_orig = import_data()
+    # EXTRACT
+    transactions = import_data()
 
-    #TRANSFORM
+    # TRANSFORM
 
-    df = add_wallet_loop(df1_orig)
-    df1 = df1_orig.copy()
+    portfolio_history = build_portfolio_history(transactions)
+    freezed_transactions = transactions.copy()
 
-    #LOAD
+    stocks_to_plot = st.sidebar.multiselect('Which trades are going to be analysed?',
+                                            freezed_transactions['id'].astype('str').unique())
+    filter_label = st.sidebar.multiselect('Which cluster is going to be analysed?',
+                                          freezed_transactions['label'].unique())
+    plot_from_date = st.sidebar.date_input('Select start of series',
+                                           value=pd.to_datetime('today') + pd.offsets.Day(-90))
+    plot_from_date = pd.to_datetime(plot_from_date)
+    plot_to_date = st.sidebar.date_input('Select end of series')
+    plot_to_date = pd.to_datetime(plot_to_date)
+
     st.title('Summary')
-    st.write(df1)
+    st.header('Transactions')
+    st.write(freezed_transactions)
 
-    filter_stocks = st.multiselect('Which trades are going to be analysed?', df['id'].astype('str').unique())
-    filter_label = st.multiselect('Which wallet is going to be analysed?', df['label'].unique())
+    st.header('Graphs')
+    plot_data = filter_plot_data(portfolio_history, stocks_to_plot, plot_from_date, plot_to_date)
+    plot_data = compute_y_values(plot_data)
+    plot_on_dashboard(plot_data)
 
-    c3, c4 = st.beta_columns(2)
+    # LOAD
 
-    with c3:
-        filter_date_start = st.date_input('Select start of series')
-
-    with c4:
-        filter_date_end = st.date_input('Select end of series')
-
-    graph = filter(filter_stocks, filter_date_start, filter_date_end)
-    graphs(graph)
 
